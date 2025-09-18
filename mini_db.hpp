@@ -12,10 +12,10 @@
 class Socket
 {
 private:
-	int _sockfd;
-	struct sockaddr_in _servaddr;
+struct sockaddr_in _servaddr;
 
 public:
+	int _sockfd;
 	Socket(int port) :
 			_sockfd(socket(AF_INET, SOCK_STREAM, 0))
 		{
@@ -77,11 +77,13 @@ class Server
 private: 
 	Socket _listeningSocket;
 	std::map<std::string, std::string> &db;
+	fd_set rfds, wfds, afds;
+	int max_fd = 0;
 public:
 	Server(int port, std::map<std::string, std::string>&database) :
 		_listeningSocket(port), db(database)
 		{
-
+			FD_ZERO(&afds);
 		}
 	//add handler function
 	void handlemessage(int clientFd, std::string message){
@@ -118,24 +120,33 @@ public:
 			try
 			{
 				_listeningSocket.bindAndListen();
-				//edit run function with this part
+				max_fd = _listeningSocket._sockfd; 
+				FD_SET(max_fd, &afds);
 				std::cout << "ready" << std::endl;
 				while(true){
+					std::cout << "AAAAAAAAAAAAAA" << std::endl;
 					sockaddr_in clientAddr;
-					try{
-						int clientFd = _listeningSocket.accept(clientAddr);
-						while(true){
-							std::string message = _listeningSocket.pullMessage(clientFd);
+					rfds = wfds = afds;
+					if (select(max_fd + 1, &rfds, &wfds, NULL, NULL) < 0)
+						throw std::runtime_error("error in select");
+					for (int fd = 0; fd <= max_fd; fd++){
+						std::cout << "BBBBBBBB" << std::endl;
+						if (!FD_ISSET(fd, &rfds))
+							continue;
+						if (fd == _listeningSocket._sockfd){
+							int clientFd = _listeningSocket.accept(clientAddr);
+							FD_SET(clientFd, &afds);
+							max_fd = clientFd > max_fd ? clientFd : max_fd;
+						}
+						else{
+							std::string message = _listeningSocket.pullMessage(fd);
 							if(message.empty()){
-								close(clientFd);
+								close(fd);
+								FD_CLR(fd, &afds);
 								break;
 							}
-							handlemessage(clientFd, message);
+							handlemessage(fd, message);
 						}
-					}
-					catch(const std::exception& e){
-						std::cerr << "Error adding a new client" << e.what() << std::endl;
-						return 1;
 					}
 				}
 				return 0; //Success
